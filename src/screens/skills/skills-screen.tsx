@@ -86,6 +86,7 @@ type HubSearchResponse = {
   error?: string
 }
 
+const ACTIVE_PROFILE_QUERY_KEY = ['profiles', 'active'] as const
 const PAGE_LIMIT = 30
 
 const DEFAULT_CATEGORIES = [
@@ -104,6 +105,94 @@ const DEFAULT_CATEGORIES = [
   'Data & Analytics',
   'Finance & Crypto',
 ]
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function readTrimmedString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function extractActiveProfileName(payload: unknown): string {
+  const record = asRecord(payload)
+  if (!record) return ''
+
+  for (const value of [
+    record.activeProfile,
+    record.active_profile,
+    record.currentProfile,
+    record.current_profile,
+    record.profile,
+  ]) {
+    const profile = readTrimmedString(value)
+    if (profile) return profile
+  }
+
+  const profileRecord = asRecord(record.profile)
+  if (profileRecord) {
+    const profile = readTrimmedString(profileRecord.name)
+    if (profile) return profile
+  }
+
+  const configRecord = asRecord(record.config)
+  if (configRecord) {
+    for (const value of [
+      configRecord.activeProfile,
+      configRecord.active_profile,
+      configRecord.currentProfile,
+      configRecord.current_profile,
+    ]) {
+      const profile = readTrimmedString(value)
+      if (profile) return profile
+    }
+  }
+
+  return ''
+}
+
+async function readJsonPayload(response: Response): Promise<unknown> {
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
+async function fetchActiveProfileName(): Promise<string> {
+  try {
+    const configResponse = await fetch('/api/config')
+    const configHeader = readTrimmedString(
+      configResponse.headers.get('X-Hermes-Active-Profile'),
+    )
+    if (configHeader) return configHeader
+
+    if (configResponse.ok) {
+      const fromConfig = extractActiveProfileName(
+        await readJsonPayload(configResponse),
+      )
+      if (fromConfig) return fromConfig
+    }
+
+    const profilesResponse = await fetch('/api/profiles/list')
+    const profilesHeader = readTrimmedString(
+      profilesResponse.headers.get('X-Hermes-Active-Profile'),
+    )
+    if (profilesHeader) return profilesHeader
+
+    if (profilesResponse.ok) {
+      const fromProfiles = extractActiveProfileName(
+        await readJsonPayload(profilesResponse),
+      )
+      if (fromProfiles) return fromProfiles
+    }
+  } catch {
+    // Keep the skills query usable even when profile discovery is unavailable.
+  }
+
+  return 'default'
+}
 
 function resolveSkillSearchTier(
   skill: SkillSummary,
@@ -141,6 +230,12 @@ export function SkillsScreen() {
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
+  const activeProfileQuery = useQuery({
+    queryKey: ACTIVE_PROFILE_QUERY_KEY,
+    queryFn: fetchActiveProfileName,
+  })
+  const activeProfile = activeProfileQuery.data ?? 'default'
+
   useEffect(() => {
     if (tab !== 'marketplace') return
 
@@ -154,7 +249,16 @@ export function SkillsScreen() {
   }, [searchInput, tab])
 
   const skillsQuery = useQuery({
-    queryKey: ['skills-browser', tab, searchInput, category, origin, page, sort],
+    queryKey: [
+      'skills-browser',
+      activeProfile,
+      tab,
+      searchInput,
+      category,
+      origin,
+      page,
+      sort,
+    ],
     queryFn: async function fetchSkills(): Promise<SkillsApiResponse> {
       const params = new URLSearchParams()
       params.set('tab', tab)
@@ -166,6 +270,12 @@ export function SkillsScreen() {
       params.set('sort', sort)
 
       const response = await fetch(`/api/skills?${params.toString()}`)
+      const responseProfile = readTrimmedString(
+        response.headers.get('X-Hermes-Active-Profile'),
+      )
+      if (responseProfile && responseProfile !== activeProfile) {
+        queryClient.setQueryData(ACTIVE_PROFILE_QUERY_KEY, responseProfile)
+      }
       const payload = (await response.json()) as SkillsApiResponse & {
         error?: string
       }

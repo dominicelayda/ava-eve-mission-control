@@ -114,6 +114,13 @@ function readYamlConfig(configPath: string): Record<string, unknown> {
   }
 }
 
+function getDisabledSkillCount(config: Record<string, unknown>): number {
+  const skills = config.skills
+  if (!skills || typeof skills !== 'object' || Array.isArray(skills)) return 0
+  const disabled = (skills as Record<string, unknown>).disabled
+  return Array.isArray(disabled) ? disabled.length : 0
+}
+
 function countFilesRecursive(
   rootPath: string,
   predicate: (fullPath: string) => boolean,
@@ -380,9 +387,13 @@ export function listProfiles(): Array<ProfileSummary> {
       const skillsDir = path.join(profilePath, 'skills')
       const sessionsDir = path.join(profilePath, 'sessions')
       const config = readYamlConfig(configPath)
-      const skillCount = countFilesRecursive(
+      const installedSkillCount = countFilesRecursive(
         skillsDir,
         (full) => path.basename(full) === 'SKILL.md',
+      )
+      const skillCount = Math.max(
+        0,
+        installedSkillCount - getDisabledSkillCount(config),
       )
       const sessionCount = countFilesRecursive(sessionsDir, (full) =>
         /\.(jsonl|json|sqlite|db)$/i.test(full),
@@ -445,6 +456,14 @@ export function listProfiles(): Array<ProfileSummary> {
   if (!defaultProvider && typeof config.provider === 'string') {
     defaultProvider = config.provider
   }
+  const installedDefaultSkillCount = countFilesRecursive(
+    path.join(root, 'skills'),
+    (full) => path.basename(full) === 'SKILL.md',
+  )
+  const defaultSkillCount = Math.max(
+    0,
+    installedDefaultSkillCount - getDisabledSkillCount(config),
+  )
   results.unshift({
     name: 'default',
     path: root,
@@ -453,10 +472,7 @@ export function listProfiles(): Array<ProfileSummary> {
     model: defaultModel,
     provider: defaultProvider,
     description: extractDescription(config) || undefined,
-    skillCount: countFilesRecursive(
-      path.join(root, 'skills'),
-      (full) => path.basename(full) === 'SKILL.md',
-    ),
+    skillCount: defaultSkillCount,
     sessionCount: countFilesRecursive(path.join(root, 'sessions'), (full) =>
       /\.(jsonl|json|sqlite|db)$/i.test(full),
     ),

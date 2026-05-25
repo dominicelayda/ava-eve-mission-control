@@ -492,6 +492,7 @@ function hasAttachableData(dt: DataTransfer | null): boolean {
         item.kind === 'file' &&
         (isImageMimeType(item.type) ||
           isTextMimeType(item.type) ||
+          item.type === 'application/pdf' ||
           item.type.trim().length === 0),
     )
   )
@@ -1420,7 +1421,7 @@ function ChatComposerComponent({
           async (file, index): Promise<ChatComposerAttachment | null> => {
             const imageFile = isImageFile(file)
             const textFile = isTextFile(file)
-            if (!imageFile && !textFile && file.type.trim().length > 0) {
+            if (!imageFile && !textFile && file.type.trim().length > 0 && file.type !== 'application/pdf') {
               return null
             }
 
@@ -1451,6 +1452,34 @@ function ChatComposerComponent({
                   'text/plain',
                 size: textBytes,
                 dataUrl: textContent,
+                kind: 'file',
+              }
+            }
+
+            // PDF and other documents — attach as base64 data URL.
+            // PDFs fail the text/image checks above but are valid for agent
+            // tools (read_file, vision_analyze) to process server-side.
+            if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+              const dataUrl = await readFileAsDataUrl(file)
+              if (!dataUrl) return null
+              const name =
+                file.name && file.name.trim().length > 0
+                  ? file.name.trim()
+                  : `document-${timestamp}-${index + 1}.pdf`
+              const transportBytes = estimateDataUrlBytes(dataUrl)
+              if (transportBytes > MAX_TRANSPORT_IMAGE_SIZE) {
+                toast(
+                  `"${name}" is ${formatFileSize(transportBytes)}. Max upload size is ${formatFileSize(MAX_TRANSPORT_IMAGE_SIZE)}.`,
+                  { type: 'warning' },
+                )
+                return null
+              }
+              return {
+                id: crypto.randomUUID(),
+                name,
+                contentType: 'application/pdf',
+                size: transportBytes,
+                dataUrl,
                 kind: 'file',
               }
             }

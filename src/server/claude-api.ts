@@ -367,6 +367,9 @@ export async function streamChat(
     model?: string
     system_message?: string
     attachments?: Array<Record<string, unknown>>
+    /** OpenAI-compatible multimodal content parts (images embedded as data URLs).
+     * When present, the gateway uses this instead of reconstructing from attachments. */
+    content?: Array<Record<string, unknown>>
   },
   opts: StreamChatOptions,
 ): Promise<void> {

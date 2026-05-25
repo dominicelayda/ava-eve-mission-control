@@ -967,15 +967,28 @@ export const Route = createFileRoute('/api/send-stream')({
               })()
 
               try {
-                await streamChat(
-                sessionKey,
-                {
+                // Build multimodal content from attachments so image
+                // attachments are embedded as OpenAI-compatible content
+                // parts (matching portable mode behaviour). The gateway
+                // natively handles image_url content blocks.
+                const userContent = buildMultimodalContent(
+                  scopedMessage,
+                  attachments,
+                )
+                const streamBody: Record<string, unknown> = {
                   message: scopedMessage,
                   model:
                     typeof body.model === 'string' ? body.model : undefined,
                   system_message: thinking,
-                  attachments: attachments || undefined,
-                },
+                }
+                if (Array.isArray(userContent)) {
+                  streamBody.content = userContent
+                } else if (attachments && attachments.length > 0) {
+                  streamBody.attachments = attachments
+                }
+                await streamChat(
+                sessionKey,
+                streamBody,
                 {
                   signal: abortController.signal,
                   async onEvent({ event, data }) {
